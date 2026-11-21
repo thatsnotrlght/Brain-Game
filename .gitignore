@@ -1,0 +1,48 @@
+
+# CMake build directories
+/build/
+/b/
+/out/
+/cmake-build-*/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# vcpkg generated dependencies
+/vcpkg_installed/
+/v/
+ 
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+
+# VS Code local settings
+.vscode/
+
+# Compiled binaries
+*.exe
+*.obj
+*.o
+*.pdb
+*.ilk
+*.dll
+*.lib
+
+# Temporary files
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# Keep 3D OBJ assets
+!/assets/
+!/assets/models/
+!/assets/models/**/*.obj
