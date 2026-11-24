@@ -1,12 +1,40 @@
 #include "Scene.h"
 
+
 #include <glm/gtc/matrix_transform.hpp>
+#include "../external/stb_easy_font.h"
 
 #include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <sstream>
 #include <vector>
+
+static void drawHudText(Renderer3D& renderer, std::string text,
+    float x, float y, float scale) {
+    struct FontVertex {
+        float x, y, z;
+        unsigned char color[4];
+    };
+
+    FontVertex vertices[1024];
+    int strokes = stb_easy_font_print(0, 0, text.data(), nullptr,
+        vertices, sizeof(vertices));
+
+    for (int i = 0; i < strokes; ++i) {
+        const auto& topLeft = vertices[i * 4];
+        const auto& bottomRight = vertices[i * 4 + 2];
+
+        float width = (bottomRight.x - topLeft.x) * scale;
+        float height = (bottomRight.y - topLeft.y) * scale;
+        glm::vec3 center(x + topLeft.x * scale + width / 2,
+            y + topLeft.y * scale + height / 2, 0.0f);
+
+        auto model = glm::translate(glm::mat4(1.0f), center);
+        model = glm::scale(model, glm::vec3(width, height, 0.1f));
+        renderer.drawCube(model, glm::vec4(1.0f));
+    }
+}
 
 bool Scene::initialize(int width, int height) {
     framebufferWidth_ = std::max(width, 1);
@@ -23,14 +51,18 @@ bool Scene::initialize(int width, int height) {
     virusLoaded_ = virusModel_.loadOBJ(VIRUS_MODEL_PATH);
     if (!virusLoaded_)
         std::cerr << "Virus model could not be loaded.\n";
+
+    neuronLoaded_ = neuronModel_.loadOBJ(NEURON_MODEL_PATH);
+    if (!neuronLoaded_)
+        std::cerr << "Neuron model could not be loaded.\n";
     return true;
 }
 
 
 Scene::DefenseStats Scene::stats(Defense type) {
-    if (type == Defense::Cortex)
-        return {"Cortex", 30, 3.5f, 85.0f, {0.70f, 0.38f, 1.0f, 1.0f}};
-    return {"Neuron", 20, 5.0f, 45.0f, {0.2f, 0.45f, 1.0f, 1.0f}};
+    if (type == Defense::VisualCortex)
+        return {"VisualCortex", 30, 3.5f, 85.0f, {0.70f, 0.38f, 1.0f, 1.0f}}; // {name, price, range, damage, color{}}
+    return {"NeuronBlaster", 20, 5.0f, 45.0f, {0.2f, 0.45f, 1.0f, 1.0f}};
 }
 
 glm::ivec2 Scene::playerTile() const {
@@ -87,8 +119,8 @@ void Scene::processInput(GLFWwindow* window) {
     }
 
     if (!gameOver_) {
-        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) selected_ = Defense::Neuron;
-        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) selected_ = Defense::Cortex;
+        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) selected_ = Defense::NeuronBlaster;
+        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) selected_ = Defense::VisualCortex;
     }
     bool buildPressed = glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS;
     if (!gameOver_ && buildPressed && !buildKeyDown_ && !restartPressed) {
@@ -121,7 +153,7 @@ void Scene::processInput(GLFWwindow* window) {
     }
 
     if (!gameOver_) {
-        title += " | WASD move | 1 Neuron (20), 2 Cortex (30) | E build ";
+        title += " | WASD move | 1 NeuronBlaster (20), 2 VisualCortex (30) | E build ";
         title += stats(selected_).name;
         if (messageTime_ > 0.0f) title += " | " + buildMessage_;
         else if (const char* problem = placementProblem(playerTile()))
@@ -163,7 +195,7 @@ void Scene::update(float deltaTime) {
 
     survivalTime_ += deltaTime;
 
-    if (survivalTime_ >= 60.0f) {
+    if (survivalTime_ >= roundDuration_) {
         gameWon_ = true;
         gameOver_ = true;
         return;
@@ -172,13 +204,33 @@ void Scene::update(float deltaTime) {
     // Spawn enemies
     spawnTimer_ += deltaTime;
 
-    if (spawnTimer_ >= 2.0f) {
+    if (spawnTimer_ >= 1.0f) {
         spawnTimer_ = 0.0f;
 
         std::uniform_int_distribution<int> pickRow(-7, 6);
         float spawnZ = static_cast<float>(pickRow(spawnRandom_)) + 0.5f;
 
-        enemies_.push_back(Enemy{ 9.5f, spawnZ, 1.5f, 100.0f });
+        float size = 0.7f;
+        float speed = 1.8f;
+        float maxHealth = 150.0f;
+
+        if (survivalTime_ >= 15.0f) {
+            std::uniform_int_distribution<int> pickVariant(0, 2);
+            const int variant = pickVariant(spawnRandom_);
+
+            if (variant == 0) {          // smaller variant
+                size = 0.45f;
+                speed = 3.2f;
+                maxHealth = 100.0f;
+            }
+            else if (variant == 2) {   // large variant
+                size = 1.0f;
+                speed = 1.4f;
+                maxHealth = 260.0f;
+            }
+        }
+
+        enemies_.push_back(Enemy{ 9.5f, spawnZ, speed, maxHealth, maxHealth, size });
     }
 
     // Move enemies
@@ -187,7 +239,7 @@ void Scene::update(float deltaTime) {
     }
 
     // Measure range from each tower center in the same X/Z plane as the tiles.
-    const float shotInterval = 0.8f;
+    const float shotInterval = 0.9f;
 
     for (Tower& tower : towers_) {
         tower.shotCooldown -= deltaTime;
@@ -286,12 +338,16 @@ void Scene::render() {
             bool alternate = (std::abs(x + z) % 2 == 0);
 
             glm::vec4 tileColor = alternate
-                ? glm::vec4(0.62f, 0.65f, 0.68f, 1.0f)
-                : glm::vec4(0.48f, 0.52f, 0.56f, 1.0f);
+                ? glm::vec4(0.54f, 0.58f, 0.62f, 1.0f)
+                : glm::vec4(0.49f, 0.53f, 0.57f, 1.0f);
+
+            if (x == 9) {
+                tileColor = glm::mix(tileColor, glm::vec4(0.78f, 0.36f, 0.38f, 1.0f), 0.45f);
+            }
 
             glm::ivec2 tile{x, z};
             if (buildable(tile))
-                tileColor = {0.27f, 0.55f, 0.52f, 1.0f};
+                tileColor = glm::mix(tileColor, glm::vec4(0.65f, 1.0f, 0.72f, 1.0f), 0.35f);
             if (!gameOver_ && tile == playerTile())
                 tileColor = placementProblem(tile) ? glm::vec4(0.95f, 0.55f, 0.18f, 1.0f)
                                                    : glm::vec4(0.53f, 0.95f, 0.42f, 1.0f);
@@ -300,27 +356,27 @@ void Scene::render() {
     }
 
     // Draw two lane dividers
-    for (int i = 0; i < 2; ++i) {
+    //for (int i = 0; i < 2; ++i) {
 
-        float dividerZ = -1.0f + i * 2.0f;
+    //    float dividerZ = -1.0f + i * 2.0f;
 
-        glm::mat4 dividerModel(1.0f);
+    //    glm::mat4 dividerModel(1.0f);
 
-        dividerModel = glm::translate(
-            dividerModel,
-            glm::vec3(0.0f, -0.88f, dividerZ)
-        );
+    //    dividerModel = glm::translate(
+    //        dividerModel,
+    //        glm::vec3(0.0f, -0.88f, dividerZ)
+    //    );
 
-        dividerModel = glm::scale(
-            dividerModel,
-            glm::vec3(12.0f, 0.04f, 0.06f)
-        );
+    //    dividerModel = glm::scale(
+    //        dividerModel,
+    //        glm::vec3(12.0f, 0.04f, 0.06f)
+    //    );
 
-        renderer_.drawCube(
-            dividerModel,
-            glm::vec4(0.8f, 0.9f, 0.6f, 1.0f)
-        );
-    }
+    //    renderer_.drawCube(
+    //        dividerModel,
+    //        glm::vec4(0.8f, 0.9f, 0.6f, 1.0f)
+    //    );
+    //}
 
 
     // Render the brain at the defended end of the battlefield.
@@ -372,7 +428,7 @@ void Scene::render() {
 
     renderer_.drawCube(
         playerModel,
-        glm::vec4(0.1f, 0.9f, 0.95f, 1.0f)
+        glm::vec4(0.1f, 0.9f, 0.95f, 0.75f)
     );
 
 
@@ -383,12 +439,12 @@ void Scene::render() {
 
         enemyModel = glm::translate(
             enemyModel,
-            glm::vec3(enemy.x, -0.55f, enemy.z)
+            glm::vec3(enemy.x, -0.9f + enemy.size * 0.5f, enemy.z)
         );
 
         enemyModel = glm::scale(
             enemyModel,
-            glm::vec3(0.7f, 0.7f, 0.7f)
+            glm::vec3(enemy.size)
         );
 
         const glm::vec4 virusColor(0.85f, 0.15f, 0.15f, 1.0f);
@@ -400,27 +456,101 @@ void Scene::render() {
             renderer_.drawCube(enemyModel, virusColor);
         }
 
-        const float healthFraction = std::clamp(enemy.health / 100.0f, 0.0f, 1.0f);
+        const float healthFraction = std::clamp(enemy.health / enemy.maxHealth, 0.0f, 1.0f);
         const float fullWidth = 0.9f;
         const float width = fullWidth * healthFraction;
         const float leftEdge = enemy.x - fullWidth * 0.5f;
 
         glm::mat4 barModel(1.0f);
         barModel = glm::translate(barModel,
-            glm::vec3(leftEdge + width * 0.5f, 0.10f, enemy.z));
+            glm::vec3(leftEdge + width * 0.5f, -0.9f + enemy.size + 0.3f, enemy.z));
         barModel = glm::scale(barModel, glm::vec3(width, 0.12f, 0.12f));
 
         renderer_.drawCube(barModel, glm::vec4(0.25f, 1.0f, 0.35f, 1.0f));
     }
 
     for (const Tower& tower : towers_) {
-        bool cortex = tower.type == Defense::Cortex;
+        const auto defense = stats(tower.type);
+        bool cortex = tower.type == Defense::VisualCortex;
         glm::vec3 size = cortex ? glm::vec3(0.86f, 1.1f, 0.86f)
                                 : glm::vec3(0.50f, 1.35f, 0.50f);
         glm::vec3 center(tower.tile.x + 0.5f, -0.9f + size.y / 2, tower.tile.y + 0.5f);
         auto model = glm::translate(glm::mat4(1.0f), center);
-        renderer_.drawCube(glm::scale(model, size), stats(tower.type).color);
+        const auto towerTransform = glm::scale(model, size);
+
+        if (neuronLoaded_) {
+            renderer_.drawModel(neuronModel_, towerTransform, defense.color);
+        }
+        else {
+            renderer_.drawCube(towerTransform, defense.color);
+        }
+
+        // turret radius
+        constexpr int dotCount = 48;
+        constexpr float fullTurn = 6.2831853f; 
+
+        for (int i = 0; i < dotCount; ++i) {
+            float angle = fullTurn * i / dotCount;
+
+            glm::vec3 dotPosition(
+                center.x + defense.range * std::cos(angle),
+                -0.84f,
+                center.z + defense.range * std::sin(angle)
+            );
+
+            auto dot = glm::translate(glm::mat4(1.0f), dotPosition);
+            dot = glm::scale(dot, glm::vec3(0.12f, 0.04f, 0.12f));
+            renderer_.drawCube(dot, defense.color);
+        }
     }
+    const glm::mat4 hudProjection = glm::ortho(
+        0.0f, static_cast<float>(framebufferWidth_),
+        static_cast<float>(framebufferHeight_), 0.0f,
+        -1.0f, 1.0f
+    );
+
+
+    glDisable(GL_DEPTH_TEST);
+    renderer_.beginFrame(glm::mat4(1.0f), hudProjection);
+
+    // Board background: 280 pixels wide, 76 tall, with a 12-pixel margin.
+    glm::mat4 panel(1.0f);
+    panel = glm::translate(panel, glm::vec3(152.0f, 50.0f, 0.0f));
+    panel = glm::scale(panel, glm::vec3(280.0f, 76.0f, 0.1f));
+    renderer_.drawCube(panel, glm::vec4(0.08f, 0.10f, 0.16f, 1.0f));
+
+    // A small swatch shows the currently selected turret's color.
+    glm::mat4 swatch(1.0f);
+    swatch = glm::translate(swatch, glm::vec3(34.0f, 50.0f, 0.0f));
+    swatch = glm::scale(swatch, glm::vec3(20.0f, 20.0f, 0.1f));
+    renderer_.drawCube(swatch, stats(selected_).color);
+
+    const auto turret = stats(selected_);
+
+    drawHudText(renderer_,
+        std::string(turret.name) + "  |  Cost " + std::to_string(turret.cost),
+        24.0f, 19.0f, 2.0f);
+
+    drawHudText(renderer_,
+        "Score " + std::to_string(score_) +
+        "   Resources " + std::to_string(resources_),
+        52.0f, 45.0f, 1.5f);
+
+    const float remaining = std::max(0.0f, roundDuration_ - survivalTime_);
+    const int secondsLeft = static_cast<int>(std::ceil(remaining));
+
+    std::string objective = "Defend the brain: " + std::to_string(secondsLeft) + "s left";
+
+    if (gameWon_) {
+        objective = "Brain defended! Press R to restart";
+    }
+    else if (gameOver_) {
+        objective = "Brain lost! Press R to restart";
+    }
+
+    drawHudText(renderer_, objective, 24.0f, 68.0f, 1.5f);
+
+    glEnable(GL_DEPTH_TEST);
 }
 
 void Scene::onFramebufferResized(int width, int height) {
@@ -431,6 +561,7 @@ void Scene::onFramebufferResized(int width, int height) {
 
 void Scene::shutdown() {
     virusModel_.shutdown();
+    neuronModel_.shutdown();
     brainModel_.shutdown();
     renderer_.shutdown();
 }
@@ -450,7 +581,7 @@ void Scene::resetGame() {
     resources_ = 30;
 
     towers_.clear();
-    selected_ = Defense::Neuron;
+    selected_ = Defense::NeuronBlaster;
     buildMessage_.clear();
     messageTime_ = 0.0f;
 }

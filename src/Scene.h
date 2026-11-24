@@ -27,7 +27,7 @@ private:
     glm::mat4 buildProjectionMatrix() const;
 
     struct Camera {
-        glm::vec3 eye{ -6.0f, 13.0f, 15.0f };
+        glm::vec3 eye{ -1.0f, 13.0f, 15.0f }; // left-right, up-down, distance
         glm::vec3 center{ 0.0f, -0.5f, 0.0f };
         glm::vec3 up{ 0.0f, 1.0f, 0.0f };
     };
@@ -43,6 +43,9 @@ private:
     // -> Draw in scene::render
     Model brainModel_;
     bool brainLoaded_ = false;
+
+    Model neuronModel_;
+    bool neuronLoaded_ = false;
 
     Model virusModel_;
     bool virusLoaded_ = false;
@@ -61,12 +64,14 @@ private:
         float z;
         float speed;
         float health;
+        float maxHealth;
+        float size;
     };
 
     std::vector<Enemy> enemies_;
     float spawnTimer_ = 0.0f;
 
-    enum class Defense { Neuron, Cortex };
+    enum class Defense { NeuronBlaster, VisualCortex };
     struct Tower {
         glm::ivec2 tile;
         Defense type;
@@ -85,7 +90,7 @@ private:
     const char* placementProblem(glm::ivec2 tile) const;
 
     std::vector<Tower> towers_;
-    Defense selected_ = Defense::Neuron;
+    Defense selected_ = Defense::NeuronBlaster;
     bool buildKeyDown_ = false;
     std::string buildMessage_;
     float messageTime_ = 0.0f;
@@ -97,6 +102,7 @@ private:
 
     bool gameOver_ = false;
     bool restartKeyWasPressed_ = false;
+    static constexpr float roundDuration_ = 60.0f;
     float survivalTime_ = 0.0f;
     bool gameWon_ = false;
 

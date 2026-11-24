@@ -19,6 +19,7 @@ add_executable(CAP4052_HW2
 target_compile_definitions(CAP4052_HW2 PRIVATE
     BRAIN_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/assets/models/Brain.obj"
     VIRUS_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/assets/models/virus.obj"
+    NEURON_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/assets/models/neuron.obj"
 )
 target_include_directories(CAP4052_HW2 PRIVATE 
 src
